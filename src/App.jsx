@@ -4,6 +4,29 @@ import { getFirestore, collection, doc, setDoc, addDoc, updateDoc, deleteDoc, on
 import { Wallet, TrendingUp, TrendingDown, Settings, LogOut, Edit2, Trash2, Plus, Check, X, Lock } from 'lucide-react';
 
 // ----------------------------------------------------------------------
+// 0. 注入 Tailwind CSS 樣式核心 (解決移除 index.css 後無樣式的問題)
+// ----------------------------------------------------------------------
+if (typeof document !== 'undefined' && !document.getElementById('tailwind-cdn')) {
+  const script = document.createElement('script');
+  script.id = 'tailwind-cdn';
+  script.src = 'https://cdn.tailwindcss.com';
+  document.head.appendChild(script);
+  
+  // 注入自定義的動畫樣式 (用來補足 Tailwind 預設沒有的特定動畫)
+  const style = document.createElement('style');
+  style.innerHTML = `
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-in {
+      animation: fadeIn 0.3s ease-out forwards;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// ----------------------------------------------------------------------
 // 1. Firebase 初始化 (使用提供的 API Key)
 // ----------------------------------------------------------------------
 const firebaseConfig = {
