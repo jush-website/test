@@ -230,233 +230,324 @@ export default function App() {
   }, [transactions]);
 
   // ==========================================
+  // 原生 CSS 樣式定義 (完全取代 Tailwind)
+  // ==========================================
+  const customStyles = `
+    :root {
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --primary-light: #e0e7ff;
+      --danger: #e11d48;
+      --danger-light: #ffe4e6;
+      --success: #059669;
+      --success-light: #d1fae5;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg); color: var(--text-main); }
+    .container { max-width: 800px; margin: 0 auto; padding: 24px 20px; }
+    .card { background: var(--card-bg); border-radius: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); border: 1px solid var(--border); padding: 24px; margin-bottom: 24px; }
+    .flex { display: flex; }
+    .items-center { align-items: center; }
+    .justify-between { justify-content: space-between; }
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+    .btn { padding: 12px 20px; border-radius: 10px; border: none; cursor: pointer; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; transition: all 0.2s; font-size: 15px; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-danger { background: var(--danger-light); color: var(--danger); }
+    .btn-danger:hover { background: #fecdd3; }
+    .btn-dark { background: #0f172a; color: white; }
+    .btn-dark:hover { background: #1e293b; }
+    .input { width: 100%; padding: 12px 16px; border: 1px solid #cbd5e1; border-radius: 10px; margin-top: 6px; font-size: 15px; transition: 0.2s; background: var(--bg); color: var(--text-main); }
+    .input:focus { outline: none; border-color: var(--primary); background: white; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
+    select.input { appearance: none; cursor: pointer; }
+    .stat-card { background: white; padding: 20px; border-radius: 16px; border: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+    .stat-title { font-size: 14px; color: var(--text-muted); margin: 0 0 8px 0; font-weight: 500; }
+    .stat-amount { font-size: 28px; font-weight: 800; margin: 0; line-height: 1; }
+    .text-success { color: var(--success); }
+    .text-danger { color: var(--danger); }
+    .text-primary { color: var(--primary); }
+    .text-blue { color: #0284c7; }
+    .icon-box { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .bg-success-light { background: var(--success-light); color: var(--success); }
+    .bg-danger-light { background: var(--danger-light); color: var(--danger); }
+    .bg-primary-light { background: var(--primary-light); color: var(--primary); }
+    .bg-blue-light { background: #e0f2fe; color: #0284c7; }
+    .header { background: white; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .header-content { max-width: 800px; margin: 0 auto; padding: 0 20px; height: 70px; display: flex; align-items: center; justify-content: space-between; }
+    .nav { display: flex; gap: 8px; }
+    .nav-btn { padding: 10px 16px; border-radius: 10px; border: none; background: transparent; cursor: pointer; color: var(--text-muted); font-weight: 600; display: flex; align-items: center; gap: 8px; transition: 0.2s; font-size: 15px; }
+    .nav-btn.active { background: var(--primary-light); color: var(--primary); }
+    .nav-btn:hover:not(.active) { background: #f1f5f9; color: var(--text-main); }
+    .mobile-nav { display: none; position: fixed; bottom: 0; left: 0; right: 0; background: white; border-top: 1px solid var(--border); padding: 10px 16px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); z-index: 100; justify-content: space-around; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); }
+    .mobile-nav-btn { display: flex; flex-direction: column; align-items: center; background: transparent; border: none; color: #94a3b8; font-size: 11px; font-weight: 600; gap: 6px; cursor: pointer; min-width: 60px; }
+    .mobile-nav-btn.active { color: var(--primary); }
+    .record-item { padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; transition: 0.2s; }
+    .record-item:hover { background: #f8fafc; }
+    .record-item:last-child { border-bottom: none; }
+    .badge { font-size: 12px; padding: 4px 10px; border-radius: 20px; background: #f1f5f9; color: var(--text-muted); margin-left: 10px; font-weight: 500; }
+    .lock-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--bg); }
+    .lock-card { background: white; width: 100%; max-width: 380px; border-radius: 20px; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.08); }
+    .lock-header { background: var(--primary); padding: 40px 24px; text-align: center; color: white; }
+    .actions { opacity: 0; display: flex; gap: 8px; transition: 0.2s; }
+    .record-item:hover .actions { opacity: 1; }
+    .action-btn { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border); background: white; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-muted); transition: 0.2s; }
+    .action-btn:hover { background: #f1f5f9; color: var(--primary); border-color: #cbd5e1; }
+    .action-btn.danger:hover { background: var(--danger-light); color: var(--danger); border-color: #fecdd3; }
+    .type-switch { display: flex; gap: 10px; margin-top: 6px; }
+    .type-btn { flex: 1; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); cursor: pointer; font-weight: 600; color: var(--text-muted); transition: 0.2s; }
+    .type-btn.expense.active { background: var(--danger-light); border-color: #fecdd3; color: var(--danger); }
+    .type-btn.income.active { background: var(--success-light); border-color: #a7f3d0; color: var(--success); }
+    .form-group { margin-bottom: 20px; }
+    .form-label { display: block; font-size: 14px; font-weight: 600; color: var(--text-main); margin-bottom: 6px; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .card-title { font-size: 18px; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px; color: var(--text-main); }
+    .empty-state { padding: 60px 20px; text-align: center; color: #94a3b8; display: flex; flex-direction: column; align-items: center; }
+    @media (max-width: 768px) {
+      .header { display: none; }
+      .mobile-nav { display: flex; }
+      .container { padding-bottom: 100px; padding-top: 16px; }
+      .grid-3, .grid-2 { grid-template-columns: 1fr; }
+      .actions { opacity: 1; }
+      .stat-amount { font-size: 24px; }
+      .record-item { flex-direction: column; align-items: flex-start; gap: 16px; }
+      .record-item > div:last-child { width: 100%; justify-content: space-between; }
+    }
+  `;
+
+  // ==========================================
   // 畫面渲染
   // ==========================================
   if (isAuthLoading) {
-    return <div className="min-h-screen bg-slate-50 flex items-center justify-center font-sans text-slate-600">載入中...</div>;
+    return (
+      <>
+        <style>{customStyles}</style>
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>載入中...</div>
+      </>
+    );
   }
 
   // --- 鎖定畫面 ---
   if (!isUnlocked) {
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans">
-        <div className="bg-white max-w-sm w-full rounded-2xl shadow-xl overflow-hidden">
-          <div className="bg-indigo-600 p-6 text-center text-white">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/20 mb-4">
-              <Wallet size={32} />
-            </div>
-            <h1 className="text-2xl font-bold">個人記帳系統</h1>
-            <p className="text-indigo-100 mt-2 text-sm">請輸入密碼以進入</p>
-          </div>
-          <form onSubmit={handleLogin} className="p-6">
-            <div className="mb-4">
-              <label className="block text-slate-700 text-sm font-bold mb-2">系統密碼</label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-3 text-slate-400" size={18} />
-                <input
-                  type="password"
-                  className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
-                  placeholder="預設密碼為 1234"
-                  value={loginInput}
-                  onChange={(e) => setLoginInput(e.target.value)}
-                  required
-                />
+      <>
+        <style>{customStyles}</style>
+        <div className="lock-screen">
+          <div className="lock-card">
+            <div className="lock-header">
+              <div className="icon-box" style={{ background: 'rgba(255,255,255,0.2)', margin: '0 auto 16px auto' }}>
+                <Wallet size={32} color="white" />
               </div>
-              {loginError && (
-                <p className="text-red-500 text-xs mt-2 flex items-center">
-                  <AlertCircle size={14} className="mr-1" /> {loginError}
-                </p>
-              )}
+              <h1 style={{ margin: 0, fontSize: '24px' }}>個人記帳系統</h1>
+              <p style={{ margin: '8px 0 0 0', opacity: 0.9, fontSize: '14px' }}>請輸入密碼以進入</p>
             </div>
-            <button
-              type="submit"
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200"
-            >
-              進入系統
-            </button>
-          </form>
+            <form onSubmit={handleLogin} style={{ padding: '32px 24px' }}>
+              <div className="form-group">
+                <label className="form-label">系統密碼</label>
+                <div style={{ position: 'relative' }}>
+                  <Lock style={{ position: 'absolute', left: '16px', top: '16px', color: '#94a3b8' }} size={18} />
+                  <input
+                    type="password"
+                    className="input"
+                    style={{ paddingLeft: '44px', marginTop: 0 }}
+                    placeholder="預設密碼為 1234"
+                    value={loginInput}
+                    onChange={(e) => setLoginInput(e.target.value)}
+                    required
+                  />
+                </div>
+                {loginError && (
+                  <p className="text-danger" style={{ fontSize: '13px', marginTop: '10px', display: 'flex', alignItems: 'center' }}>
+                    <AlertCircle size={16} style={{ marginRight: '6px' }} /> {loginError}
+                  </p>
+                )}
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
+                進入系統
+              </button>
+            </form>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   // --- 主畫面 ---
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 pb-20 md:pb-0">
-      {/* 頂部導覽列 (桌面版) */}
-      <header className="bg-white shadow-sm sticky top-0 z-10 hidden md:block">
-        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center text-indigo-600 font-bold text-xl">
-            <Wallet className="mr-2" size={24} /> 記帳系統
-          </div>
-          <nav className="flex space-x-1">
-            <NavButton icon={<PlusCircle size={18}/>} label="新增收支" active={currentTab === 'dashboard'} onClick={() => setCurrentTab('dashboard')} />
-            <NavButton icon={<List size={18}/>} label="歷史紀錄" active={currentTab === 'records'} onClick={() => setCurrentTab('records')} />
-            <NavButton icon={<Settings size={18}/>} label="系統設定" active={currentTab === 'settings'} onClick={() => setCurrentTab('settings')} />
-            <button onClick={handleLogout} className="flex items-center px-3 py-2 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-md transition text-sm font-medium ml-4">
-              <LogOut size={18} className="mr-1.5" /> 登出
-            </button>
-          </nav>
-        </div>
-      </header>
-
-      {/* 底部導覽列 (手機版) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white shadow-[0_-2px_10px_rgba(0,0,0,0.05)] z-20 flex justify-around p-2">
-        <MobileNavButton icon={<PlusCircle size={20}/>} label="新增" active={currentTab === 'dashboard'} onClick={() => setCurrentTab('dashboard')} />
-        <MobileNavButton icon={<List size={20}/>} label="紀錄" active={currentTab === 'records'} onClick={() => setCurrentTab('records')} />
-        <MobileNavButton icon={<Settings size={20}/>} label="設定" active={currentTab === 'settings'} onClick={() => setCurrentTab('settings')} />
-        <button onClick={handleLogout} className="flex flex-col items-center p-2 text-slate-400 hover:text-red-500">
-          <LogOut size={20} />
-          <span className="text-[10px] mt-1 font-medium">登出</span>
-        </button>
-      </nav>
-
-      {/* 內容區塊 */}
-      <main className="max-w-4xl mx-auto px-4 py-6 md:py-8">
-        
-        {/* 儀表板與新增表單 */}
-        {currentTab === 'dashboard' && (
-          <div className="space-y-6">
-            {/* 統計面板 */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <StatCard title="本月結餘" amount={stats.balance} icon={<DollarSign size={24} className="text-blue-500"/>} colorClass={stats.balance >= 0 ? 'text-blue-600' : 'text-red-500'} bgClass="bg-blue-50" />
-              <StatCard title="總收入" amount={stats.income} icon={<TrendingUp size={24} className="text-emerald-500"/>} colorClass="text-emerald-600" bgClass="bg-emerald-50" />
-              <StatCard title="總支出" amount={stats.expense} icon={<TrendingDown size={24} className="text-rose-500"/>} colorClass="text-rose-600" bgClass="bg-rose-50" />
+    <>
+      <style>{customStyles}</style>
+      <div>
+        {/* 頂部導覽列 (桌面版) */}
+        <header className="header">
+          <div className="header-content">
+            <div className="card-title text-primary">
+              <Wallet size={24} /> 記帳系統
             </div>
+            <nav className="nav">
+              <NavButton icon={<PlusCircle size={18}/>} label="新增收支" active={currentTab === 'dashboard'} onClick={() => setCurrentTab('dashboard')} />
+              <NavButton icon={<List size={18}/>} label="歷史紀錄" active={currentTab === 'records'} onClick={() => setCurrentTab('records')} />
+              <NavButton icon={<Settings size={18}/>} label="系統設定" active={currentTab === 'settings'} onClick={() => setCurrentTab('settings')} />
+              <button onClick={handleLogout} className="nav-btn" style={{ marginLeft: '16px', color: '#e11d48' }}>
+                <LogOut size={18} /> 登出
+              </button>
+            </nav>
+          </div>
+        </header>
 
-            {/* 新增/編輯表單 */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 md:p-6">
-              <div className="flex justify-between items-center mb-5">
-                <h2 className="text-lg font-bold text-slate-800 flex items-center">
-                  {editingId ? <Edit2 size={20} className="mr-2 text-indigo-500"/> : <PlusCircle size={20} className="mr-2 text-indigo-500"/>}
-                  {editingId ? '編輯紀錄' : '新增收支'}
+        {/* 底部導覽列 (手機版) */}
+        <nav className="mobile-nav">
+          <MobileNavButton icon={<PlusCircle size={22}/>} label="新增" active={currentTab === 'dashboard'} onClick={() => setCurrentTab('dashboard')} />
+          <MobileNavButton icon={<List size={22}/>} label="紀錄" active={currentTab === 'records'} onClick={() => setCurrentTab('records')} />
+          <MobileNavButton icon={<Settings size={22}/>} label="設定" active={currentTab === 'settings'} onClick={() => setCurrentTab('settings')} />
+          <button onClick={handleLogout} className="mobile-nav-btn" style={{ color: '#e11d48' }}>
+            <LogOut size={22} />
+            <span>登出</span>
+          </button>
+        </nav>
+
+        {/* 內容區塊 */}
+        <main className="container">
+          
+          {/* 儀表板與新增表單 */}
+          {currentTab === 'dashboard' && (
+            <div>
+              {/* 統計面板 */}
+              <div className="grid-3">
+                <StatCard title="本月結餘" amount={stats.balance} icon={<DollarSign size={24} />} colorClass={stats.balance >= 0 ? 'text-blue' : 'text-danger'} bgClass="bg-blue-light" />
+                <StatCard title="總收入" amount={stats.income} icon={<TrendingUp size={24} />} colorClass="text-success" bgClass="bg-success-light" />
+                <StatCard title="總支出" amount={stats.expense} icon={<TrendingDown size={24} />} colorClass="text-danger" bgClass="bg-danger-light" />
+              </div>
+
+              {/* 新增/編輯表單 */}
+              <div className="card">
+                <div className="card-header">
+                  <h2 className="card-title">
+                    {editingId ? <Edit2 size={20} className="text-primary"/> : <PlusCircle size={20} className="text-primary"/>}
+                    {editingId ? '編輯紀錄' : '新增收支'}
+                  </h2>
+                  {editingId && (
+                    <button onClick={() => { setEditingId(null); setFormData(initialForm); }} className="badge" style={{ border: 'none', cursor: 'pointer' }}>取消編輯</button>
+                  )}
+                </div>
+                
+                <form onSubmit={handleSubmitTransaction}>
+                  <div className="grid-2">
+                    <div className="form-group">
+                      <label className="form-label">日期</label>
+                      <input type="date" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} className="input" />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">類型</label>
+                      <div className="type-switch">
+                        <button type="button" 
+                          onClick={() => setFormData({...formData, type: 'expense', category: categories.expense[0]})}
+                          className={`type-btn expense ${formData.type === 'expense' ? 'active' : ''}`}>
+                          支出
+                        </button>
+                        <button type="button" 
+                          onClick={() => setFormData({...formData, type: 'income', category: categories.income[0]})}
+                          className={`type-btn income ${formData.type === 'income' ? 'active' : ''}`}>
+                          收入
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid-2">
+                    <div className="form-group">
+                      <label className="form-label">分類</label>
+                      <select required value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})} className="input">
+                        {categories[formData.type].map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">金額</label>
+                      <div style={{ position: 'relative' }}>
+                        <span style={{ position: 'absolute', left: '16px', top: '16px', color: '#94a3b8', fontWeight: 600 }}>$</span>
+                        <input type="number" required min="1" value={formData.amount} onChange={(e) => setFormData({...formData, amount: e.target.value})} placeholder="0" className="input" style={{ paddingLeft: '32px' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">備註</label>
+                    <input type="text" value={formData.note} onChange={(e) => setFormData({...formData, note: e.target.value})} placeholder="選填..." className="input" />
+                  </div>
+
+                  <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }}>
+                    {editingId ? '儲存修改' : '新增紀錄'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* 歷史紀錄列表 */}
+          {currentTab === 'records' && (
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ padding: '20px 24px', background: '#f8fafc', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h2 className="card-title">
+                  <List size={20} className="text-primary"/> 所有紀錄
                 </h2>
-                {editingId && (
-                  <button onClick={() => { setEditingId(null); setFormData(initialForm); }} className="text-sm text-slate-500 hover:text-slate-800 bg-slate-100 px-3 py-1 rounded-full">取消編輯</button>
-                )}
+                <span style={{ color: 'var(--text-muted)', fontSize: '14px', fontWeight: 500 }}>共 {transactions.length} 筆</span>
               </div>
               
-              <form onSubmit={handleSubmitTransaction} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* 日期 */}
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">日期</label>
-                    <input type="date" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:bg-white transition" />
-                  </div>
-                  {/* 收支類型 */}
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">類型</label>
-                    <div className="flex space-x-2">
-                      <button type="button" 
-                        onClick={() => setFormData({...formData, type: 'expense', category: categories.expense[0]})}
-                        className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${formData.type === 'expense' ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'}`}>
-                        支出
-                      </button>
-                      <button type="button" 
-                        onClick={() => setFormData({...formData, type: 'income', category: categories.income[0]})}
-                        className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${formData.type === 'income' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'}`}>
-                        收入
-                      </button>
-                    </div>
-                  </div>
+              {transactions.length === 0 ? (
+                <div className="empty-state">
+                  <List size={48} style={{ marginBottom: '16px', opacity: 0.2 }} />
+                  <p style={{ margin: 0, fontWeight: 500 }}>目前還沒有任何紀錄喔！</p>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* 分類 */}
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">分類</label>
-                    <select required value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:bg-white transition">
-                      {categories[formData.type].map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                    </select>
-                  </div>
-                  {/* 金額 */}
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">金額</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-2.5 text-slate-400">$</span>
-                      <input type="number" required min="1" value={formData.amount} onChange={(e) => setFormData({...formData, amount: e.target.value})} placeholder="0"
-                        className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:bg-white transition" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* 備註 */}
+              ) : (
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">備註</label>
-                  <input type="text" value={formData.note} onChange={(e) => setFormData({...formData, note: e.target.value})} placeholder="選填..."
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:bg-white transition" />
-                </div>
-
-                <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm mt-4">
-                  {editingId ? '儲存修改' : '新增紀錄'}
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* 歷史紀錄列表 */}
-        {currentTab === 'records' && (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-              <h2 className="text-lg font-bold text-slate-800 flex items-center">
-                <List size={20} className="mr-2 text-indigo-500"/> 所有紀錄
-              </h2>
-              <span className="text-sm text-slate-500">共 {transactions.length} 筆</span>
-            </div>
-            
-            {transactions.length === 0 ? (
-              <div className="p-10 text-center text-slate-400 flex flex-col items-center">
-                <List size={48} className="mb-3 opacity-20" />
-                <p>目前還沒有任何紀錄喔！</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {transactions.map(record => (
-                  <div key={record.id} className="p-4 hover:bg-slate-50 transition flex items-center justify-between group">
-                    <div className="flex items-center space-x-4">
-                      <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold ${record.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
-                        {record.category[0]}
-                      </div>
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <span className="font-bold text-slate-800">{record.category}</span>
-                          {record.note && <span className="text-sm text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{record.note}</span>}
+                  {transactions.map(record => (
+                    <div key={record.id} className="record-item">
+                      <div className="flex items-center" style={{ gap: '16px' }}>
+                        <div className={`icon-box ${record.type === 'income' ? 'bg-success-light' : 'bg-danger-light'}`} style={{ fontWeight: 700, fontSize: '18px' }}>
+                          {record.category[0]}
                         </div>
-                        <div className="text-xs text-slate-400 mt-1">{record.date}</div>
+                        <div>
+                          <div className="flex items-center">
+                            <span style={{ fontWeight: 700, fontSize: '16px', color: 'var(--text-main)' }}>{record.category}</span>
+                            {record.note && <span className="badge">{record.note}</span>}
+                          </div>
+                          <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '6px', fontWeight: 500 }}>{record.date}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center" style={{ gap: '24px' }}>
+                        <span className={`stat-amount ${record.type === 'income' ? 'text-success' : ''}`} style={{ fontSize: '20px' }}>
+                          {record.type === 'income' ? '+' : '-'}${record.amount.toLocaleString()}
+                        </span>
+                        <div className="actions">
+                          <button onClick={() => handleEdit(record)} className="action-btn">
+                            <Edit2 size={16} />
+                          </button>
+                          <button onClick={() => handleDelete(record.id)} className="action-btn danger">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    <div className="flex items-center space-x-4">
-                      <span className={`font-bold text-lg ${record.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
-                        {record.type === 'income' ? '+' : '-'}${record.amount.toLocaleString()}
-                      </span>
-                      <div className="flex space-x-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => handleEdit(record)} className="p-2 text-slate-400 hover:text-indigo-600 bg-white shadow-sm border border-slate-100 rounded-full hover:bg-indigo-50 transition">
-                          <Edit2 size={16} />
-                        </button>
-                        <button onClick={() => handleDelete(record.id)} className="p-2 text-slate-400 hover:text-red-600 bg-white shadow-sm border border-slate-100 rounded-full hover:bg-red-50 transition">
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
-        {/* 系統設定 */}
-        {currentTab === 'settings' && (
-          <SettingsPanel 
-            currentPassword={systemPassword} 
-            onChangePassword={handleChangePassword} 
-          />
-        )}
-      </main>
-    </div>
+          {/* 系統設定 */}
+          {currentTab === 'settings' && (
+            <SettingsPanel 
+              currentPassword={systemPassword} 
+              onChangePassword={handleChangePassword} 
+            />
+          )}
+        </main>
+      </div>
+    </>
   );
 }
 
@@ -464,27 +555,27 @@ export default function App() {
 // 輔助 UI 元件
 // ==========================================
 const NavButton = ({ icon, label, active, onClick }) => (
-  <button onClick={onClick} className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition ${active ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
-    <span className="mr-2">{icon}</span> {label}
+  <button onClick={onClick} className={`nav-btn ${active ? 'active' : ''}`}>
+    {icon} {label}
   </button>
 );
 
 const MobileNavButton = ({ icon, label, active, onClick }) => (
-  <button onClick={onClick} className={`flex flex-col items-center p-2 min-w-[64px] transition ${active ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}>
+  <button onClick={onClick} className={`mobile-nav-btn ${active ? 'active' : ''}`}>
     {icon}
-    <span className={`text-[10px] mt-1 ${active ? 'font-bold' : 'font-medium'}`}>{label}</span>
+    <span>{label}</span>
   </button>
 );
 
 const StatCard = ({ title, amount, icon, colorClass, bgClass }) => (
-  <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+  <div className="stat-card">
     <div>
-      <p className="text-sm font-medium text-slate-500 mb-1">{title}</p>
-      <h3 className={`text-2xl font-black ${colorClass}`}>
+      <p className="stat-title">{title}</p>
+      <h3 className={`stat-amount ${colorClass}`}>
         ${amount.toLocaleString()}
       </h3>
     </div>
-    <div className={`w-12 h-12 rounded-full flex items-center justify-center ${bgClass}`}>
+    <div className={`icon-box ${bgClass}`}>
       {icon}
     </div>
   </div>
@@ -504,29 +595,29 @@ const SettingsPanel = ({ currentPassword, onChangePassword }) => {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-md mx-auto">
-      <h2 className="text-lg font-bold text-slate-800 mb-5 flex items-center">
-        <Settings size={20} className="mr-2 text-indigo-500"/> 系統後台設定
+    <div className="card" style={{ maxWidth: '400px', margin: '0 auto' }}>
+      <h2 className="card-title" style={{ marginBottom: '24px' }}>
+        <Settings size={20} className="text-primary"/> 系統後台設定
       </h2>
       
-      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-6">
-        <p className="text-sm text-slate-600 mb-1">目前登入密碼：</p>
-        <p className="text-lg font-mono font-bold tracking-widest text-slate-800">{currentPassword}</p>
+      <div style={{ background: 'var(--bg)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)', marginBottom: '24px' }}>
+        <p style={{ fontSize: '14px', color: 'var(--text-muted)', margin: '0 0 8px 0', fontWeight: 500 }}>目前登入密碼：</p>
+        <p style={{ fontSize: '20px', fontFamily: 'monospace', fontWeight: 800, letterSpacing: '4px', margin: 0, color: 'var(--text-main)' }}>{currentPassword}</p>
       </div>
 
-      <form onSubmit={onSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">設定新密碼</label>
+      <form onSubmit={onSubmit}>
+        <div className="form-group">
+          <label className="form-label">設定新密碼</label>
           <input 
             type="text" 
             value={newPwd} 
             onChange={(e) => setNewPwd(e.target.value)}
             placeholder="請輸入新密碼"
             required
-            className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
+            className="input"
           />
         </div>
-        <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 px-4 rounded-lg transition">
+        <button type="submit" className="btn btn-dark" style={{ width: '100%' }}>
           更新密碼
         </button>
       </form>
