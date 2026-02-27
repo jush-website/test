@@ -1,16 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, collection, addDoc, updateDoc, deleteDoc, 
-  doc, onSnapshot, setDoc 
+  getFirestore, collection, addDoc, onSnapshot, query, orderBy, 
+  deleteDoc, doc, updateDoc, getDoc, setDoc 
 } from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 
-// ==========================================
-// 1. Firebase 初始化與配置
-// ==========================================
-// 系統會優先使用您提供的設定，若在預覽環境中則自動對接預覽資料庫
-const userFirebaseConfig = {
+// 初始化 Firebase
+const firebaseConfig = {
   apiKey: "AIzaSyCyiy4q9kzacnAaB-oURmXe00tRZ_ocf7M",
   authDomain: "test-ff8f4.firebaseapp.com",
   projectId: "test-ff8f4",
@@ -20,322 +16,499 @@ const userFirebaseConfig = {
   measurementId: "G-6Q5L31J9PK"
 };
 
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : userFirebaseConfig;
-
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
 const db = getFirestore(app);
 
-// 輔助函式：確保在各環境下都能對應正確的 Collection 路徑
-const getCollectionPath = (colName) => {
-  if (typeof __firebase_config !== 'undefined' && typeof __app_id !== 'undefined') {
-    return collection(db, 'artifacts', __app_id, 'public', 'data', colName);
-  }
-  return collection(db, colName); // 本地端使用正常的根目錄 collection
-};
-
-const getDocPath = (colName, docId) => {
-  if (typeof __firebase_config !== 'undefined' && typeof __app_id !== 'undefined') {
-    return doc(db, 'artifacts', __app_id, 'public', 'data', colName, docId);
-  }
-  return doc(db, colName, docId); // 本地端使用正常的 doc 路徑
-};
-
-
-// ==========================================
-// 2. 主應用程式 Component
-// ==========================================
 export default function App() {
-  // 狀態管理
-  const [user, setUser] = useState(null);
-  const [recordsLoaded, setRecordsLoaded] = useState(false);
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(localStorage.getItem('isLoggedIn') === 'true');
-  const [systemPassword, setSystemPassword] = useState('1234'); // 預設密碼 1234
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard' or 'settings'
   
-  const [records, setRecords] = useState([]);
-  const [currentTab, setCurrentTab] = useState('dashboard'); // 'dashboard' or 'settings'
+  // 資料狀態
+  const [transactions, setTransactions] = useState([]);
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
   
-  // 表單與登入輸入狀態
-  const [loginInput, setLoginInput] = useState('');
-  const [newPasswordInput, setNewPasswordInput] = useState('');
-  const [editId, setEditId] = useState(null);
-  const [formData, setFormData] = useState(getInitialForm());
+  // 表單狀態
+  const [formData, setFormData] = useState({
+    date: new Date().toISOString().split('T')[0],
+    type: 'expense',
+    category: '',
+    amount: '',
+    note: ''
+  });
+  const [editingId, setEditingId] = useState(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [formMessage, setFormMessage] = useState({ text: '', type: '' });
 
-  function getInitialForm() {
-    return {
-      date: new Date().toISOString().split('T')[0],
-      type: 'expense',
-      category: '',
-      amount: '',
-      note: ''
-    };
-  }
+  // 設定頁面狀態
+  const [newPassword, setNewPassword] = useState('');
+  const [settingsMessage, setSettingsMessage] = useState({ text: '', type: '' });
 
-  // Firebase 匿名登入 (Firestore 安全性要求)
+  // 1. 初始化應用程式與檢查登入狀態
   useEffect(() => {
-    const initAuth = async () => {
+    const initApp = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
+        // 確保設定檔中存在密碼，若無則預設為 1234
+        const authDocRef = doc(db, "settings", "auth");
+        const authDoc = await getDoc(authDocRef);
+        if (!authDoc.exists()) {
+          await setDoc(authDocRef, { password: "1234" });
         }
-      } catch (err) {
-        console.error("Auth Error:", err);
+
+        // 檢查 LocalStorage 登入狀態
+        const isAuth = localStorage.getItem('accounting_isAuth') === 'true';
+        setIsAuthenticated(isAuth);
+      } catch (error) {
+        console.error("初始化失敗:", error);
+      } finally {
+        // 只有未登入時才在此關閉 loading，登入的話由資料監聽器關閉
+        if (!(localStorage.getItem('accounting_isAuth') === 'true')) {
+          setIsLoading(false);
+        }
       }
     };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
-    return () => unsubscribe();
+    initApp();
   }, []);
 
-  // 監聽 Firestore 資料
+  // 2. 登入後監聽資料庫變化
   useEffect(() => {
-    if (!user) return;
-
-    // 監聽設定 (密碼)
-    const unsubSettings = onSnapshot(getCollectionPath('settings'), (snapshot) => {
-      let pwd = '1234'; // 若無設定則預設 1234
-      snapshot.forEach(doc => {
-        if (doc.id === 'auth') pwd = doc.data().password;
+    let unsubscribe = () => {};
+    
+    if (isAuthenticated) {
+      setIsLoading(true);
+      const q = query(collection(db, "transactions"), orderBy("date", "desc"));
+      
+      unsubscribe = onSnapshot(q, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setTransactions(data);
+        setIsLoading(false);
+      }, (error) => {
+        console.error("讀取資料失敗:", error);
+        setIsLoading(false);
       });
-      setSystemPassword(pwd);
-      setSettingsLoaded(true);
-    }, (error) => console.error("Settings Load Error:", error));
-
-    // 監聽記帳紀錄
-    const unsubRecords = onSnapshot(getCollectionPath('records'), (snapshot) => {
-      const data = [];
-      snapshot.forEach(d => data.push({ id: d.id, ...d.data() }));
-      // 記憶體中進行「日期降序」排序
-      data.sort((a, b) => new Date(b.date) - new Date(a.date));
-      setRecords(data);
-      setRecordsLoaded(true);
-    }, (error) => console.error("Records Load Error:", error));
-
-    return () => {
-      unsubSettings();
-      unsubRecords();
-    };
-  }, [user]);
-
-  // 統計計算 (利用 useMemo 避免多餘渲染)
-  const { totalIncome, totalExpense, balance } = useMemo(() => {
-    let income = 0;
-    let expense = 0;
-    records.forEach(r => {
-      if (r.type === 'income') income += Number(r.amount);
-      if (r.type === 'expense') expense += Number(r.amount);
-    });
-    return { totalIncome: income, totalExpense: expense, balance: income - expense };
-  }, [records]);
-
-  // ==========================================
-  // 操作處理邏輯
-  // ==========================================
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (loginInput === systemPassword) {
-      setIsLoggedIn(true);
-      localStorage.setItem('isLoggedIn', 'true');
-    } else {
-      alert('密碼錯誤，請重新輸入。');
     }
-  };
 
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    localStorage.removeItem('isLoggedIn');
-    setLoginInput('');
-    setCurrentTab('dashboard');
-  };
+    return () => unsubscribe();
+  }, [isAuthenticated]);
 
-  const handleSubmitRecord = async (e) => {
+  // 登入處理
+  const handleLogin = async (e) => {
     e.preventDefault();
-    if (!formData.category || !formData.amount) return;
-
-    const dataToSave = {
-      ...formData,
-      amount: Number(formData.amount)
-    };
-
+    setIsLoading(true);
+    setLoginError('');
     try {
-      if (editId) {
-        await updateDoc(getDocPath('records', editId), dataToSave);
+      const authDoc = await getDoc(doc(db, "settings", "auth"));
+      const currentPassword = authDoc.data().password;
+      
+      if (loginPassword === currentPassword) {
+        localStorage.setItem('accounting_isAuth', 'true');
+        setIsAuthenticated(true);
       } else {
-        await addDoc(getCollectionPath('records'), dataToSave);
+        setLoginError('密碼錯誤，請重新輸入。');
       }
-      setFormData(getInitialForm());
-      setEditId(null);
     } catch (error) {
-      console.error("Save Record Error:", error);
+      setLoginError('系統發生錯誤，無法驗證密碼。');
     }
+    setIsLoading(false);
   };
 
-  const handleEdit = (record) => {
-    setEditId(record.id);
+  // 登出處理
+  const handleLogout = () => {
+    localStorage.removeItem('accounting_isAuth');
+    setIsAuthenticated(false);
+    setCurrentView('dashboard');
+  };
+
+  // 表單輸入處理
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  // 提交記帳表單
+  const handleSubmitTransaction = async (e) => {
+    e.preventDefault();
+    if (!formData.category || !formData.amount) {
+      showMessage(setFormMessage, '分類與金額為必填欄位', 'error');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const payload = {
+        ...formData,
+        amount: Number(formData.amount),
+        timestamp: new Date().getTime()
+      };
+
+      if (editingId) {
+        await updateDoc(doc(db, "transactions", editingId), payload);
+        showMessage(setFormMessage, '更新成功', 'success');
+        setEditingId(null);
+      } else {
+        await addDoc(collection(db, "transactions"), payload);
+        showMessage(setFormMessage, '新增成功', 'success');
+      }
+      
+      // 重置部分表單
+      setFormData(prev => ({ ...prev, category: '', amount: '', note: '' }));
+    } catch (error) {
+      console.error(error);
+      showMessage(setFormMessage, '儲存失敗，請重試', 'error');
+    }
+    setIsLoading(false);
+  };
+
+  // 編輯記錄
+  const handleEdit = (transaction) => {
     setFormData({
-      date: record.date,
-      type: record.type,
-      category: record.category,
-      amount: record.amount,
-      note: record.note || ''
+      date: transaction.date,
+      type: transaction.type,
+      category: transaction.category,
+      amount: transaction.amount,
+      note: transaction.note || ''
     });
+    setEditingId(transaction.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // 刪除記錄
   const handleDelete = async (id) => {
-    if (window.confirm("確定要刪除這筆記錄嗎？")) {
-      try {
-        await deleteDoc(getDocPath('records', id));
-      } catch (error) {
-        console.error("Delete Record Error:", error);
-      }
+    setIsLoading(true);
+    try {
+      await deleteDoc(doc(db, "transactions", id));
+      setDeleteConfirmId(null);
+    } catch (error) {
+      console.error(error);
+      showMessage(setFormMessage, '刪除失敗', 'error');
     }
+    setIsLoading(false);
   };
 
+  // 更新密碼
   const handleUpdatePassword = async (e) => {
     e.preventDefault();
-    if (!newPasswordInput) return;
-    try {
-      await setDoc(getDocPath('settings', 'auth'), { password: newPasswordInput });
-      alert("密碼更新成功！");
-      setNewPasswordInput('');
-    } catch (error) {
-      console.error("Update Password Error:", error);
+    if (!newPassword || newPassword.length < 4) {
+      showMessage(setSettingsMessage, '新密碼至少需 4 個字元', 'error');
+      return;
     }
+
+    setIsLoading(true);
+    try {
+      await updateDoc(doc(db, "settings", "auth"), { password: newPassword });
+      showMessage(setSettingsMessage, '密碼更新成功！', 'success');
+      setNewPassword('');
+    } catch (error) {
+      showMessage(setSettingsMessage, '密碼更新失敗', 'error');
+    }
+    setIsLoading(false);
   };
 
-  // 全螢幕載入中遮罩
-  const isLoading = !recordsLoaded || !settingsLoaded;
+  // 共用顯示訊息工具
+  const showMessage = (setter, text, type) => {
+    setter({ text, type });
+    setTimeout(() => setter({ text: '', type: '' }), 3000);
+  };
 
-  // ==========================================
-  // UI 渲染
-  // ==========================================
+  // 統計計算
+  const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
+  const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+  const balance = totalIncome - totalExpense;
+
   return (
     <>
-      {/* 使用內嵌 Style 封裝樣式 */}
+      {/* 內嵌樣式定義區 */}
       <style>{`
-        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { margin: 0; background-color: #f3f4f6; color: #1f2937; }
-        
-        /* 載入中與登入頁面 (水平垂直置中) */
-        .fullscreen-center { 
-          position: fixed; top: 0; left: 0; width: 100%; height: 100vh;
-          display: flex; flex-direction: column; justify-content: center; align-items: center;
-          background: #f3f4f6; z-index: 1000;
+        :root {
+          --primary: #3b82f6;     /* 藍色 */
+          --success: #10b981;     /* 綠色 */
+          --danger: #ef4444;      /* 紅色 */
+          --bg-color: #f3f4f6;
+          --card-bg: #ffffff;
+          --text-main: #1f2937;
+          --text-muted: #6b7280;
+          --border-color: #e5e7eb;
         }
-        .overlay { background: rgba(243, 244, 246, 0.95); }
-        .spinner {
-          border: 4px solid #e5e7eb; border-top: 4px solid #4F46E5;
-          border-radius: 50%; width: 50px; height: 50px;
-          animation: spin 1s linear infinite; margin-bottom: 20px;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* 登入卡片 */
+        body {
+          margin: 0;
+          padding: 0;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          background-color: var(--bg-color);
+          color: var(--text-main);
+          box-sizing: border-box;
+        }
+        
+        * {
+          box-sizing: inherit;
+        }
+
+        /* 全螢幕載入遮罩 */
+        .loading-mask {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100vw;
+          height: 100vh;
+          background-color: rgba(255, 255, 255, 0.9);
+          backdrop-filter: blur(4px);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          z-index: 9999;
+        }
+
+        .spinner {
+          width: 50px;
+          height: 50px;
+          border: 5px solid var(--border-color);
+          border-top-color: var(--primary);
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
+        }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        /* 登入畫面 - 絕對置中 */
+        .login-container {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 100vh;
+          padding: 20px;
+        }
+
+        .card {
+          background-color: var(--card-bg);
+          border-radius: 16px;
+          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+          padding: 32px;
+          width: 100%;
+        }
+
         .login-card {
-          background: white; padding: 40px; border-radius: 12px;
-          box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 400px;
+          max-width: 400px;
           text-align: center;
         }
-        
-        /* 主體架構 (max-width 800px 居中) */
-        .app-container { max-width: 800px; margin: 40px auto; padding: 0 20px; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
-        .nav-btn {
-          margin-left: 10px; padding: 8px 16px; border: none; border-radius: 8px;
-          cursor: pointer; background: #e5e7eb; color: #374151; font-weight: 500; transition: 0.2s;
-        }
-        .nav-btn.active { background: #4F46E5; color: white; }
-        .nav-btn.logout { background: #ef4444; color: white; margin-left: 20px; }
-        
-        /* 卡片共用樣式 */
-        .card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 30px; }
-        
-        /* 統計卡片 */
-        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
-        @media (max-width: 600px) { .stats-grid { grid-template-columns: 1fr; } }
-        .stat-card { padding: 20px; border-radius: 12px; color: white; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        .stat-card.income { background: #10B981; }
-        .stat-card.expense { background: #EF4444; }
-        .stat-card.balance { background: #3B82F6; }
-        .stat-card h3 { margin: 0 0 10px 0; font-size: 15px; font-weight: 500; opacity: 0.9; }
-        .stat-card p { margin: 0; font-size: 28px; font-weight: bold; }
 
-        /* 表單元件 */
-        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }
-        @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
-        .form-group { display: flex; flex-direction: column; text-align: left; margin-bottom: 15px; }
-        .form-group label { margin-bottom: 6px; font-size: 14px; color: #4b5563; font-weight: 500; }
+        /* 系統主要容器 */
+        .app-container {
+          max-width: 900px;
+          margin: 0 auto;
+          padding: 24px 16px;
+        }
+
+        /* 導覽列 */
+        .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 24px;
+        }
+
+        .nav-brand {
+          font-size: 1.5rem;
+          font-weight: bold;
+          color: var(--primary);
+          margin: 0;
+        }
+
+        .nav-menu {
+          display: flex;
+          gap: 16px;
+          align-items: center;
+        }
+
+        /* 統計看板 */
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+          gap: 16px;
+          margin-bottom: 32px;
+        }
+
+        .stat-card {
+          padding: 24px;
+          border-radius: 16px;
+          background: var(--card-bg);
+          box-shadow: 0 4px 6px rgba(0,0,0,0.03);
+          text-align: center;
+          border-top: 4px solid transparent;
+        }
+
+        .stat-card.income { border-top-color: var(--success); }
+        .stat-card.expense { border-top-color: var(--danger); }
+        .stat-card.balance { border-top-color: var(--primary); }
+
+        .stat-title {
+          font-size: 0.95rem;
+          color: var(--text-muted);
+          margin-bottom: 8px;
+          font-weight: 500;
+        }
+
+        .stat-value {
+          font-size: 2rem;
+          font-weight: 700;
+        }
+        
+        .text-success { color: var(--success); }
+        .text-danger { color: var(--danger); }
+        .text-primary { color: var(--primary); }
+
+        /* 表單與列表 */
+        .form-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+          gap: 16px;
+          margin-bottom: 16px;
+        }
+
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          text-align: left;
+        }
+
+        .form-group label {
+          font-size: 0.9rem;
+          font-weight: 600;
+          color: var(--text-main);
+        }
+
         .form-control {
-          padding: 12px; border: 1px solid #d1d5db; border-radius: 8px;
-          font-size: 15px; outline: none; transition: border-color 0.2s; width: 100%;
+          padding: 10px 14px;
+          border: 1px solid var(--border-color);
+          border-radius: 8px;
+          font-size: 1rem;
+          transition: border-color 0.2s, box-shadow 0.2s;
+          background: #fafafa;
         }
-        .form-control:focus { border-color: #4F46E5; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
+
+        .form-control:focus {
+          outline: none;
+          border-color: var(--primary);
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+          background: #fff;
+        }
+
+        /* 按鈕樣式 */
+        .btn {
+          padding: 10px 20px;
+          border: none;
+          border-radius: 8px;
+          font-size: 1rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background-color 0.2s, transform 0.1s;
+          text-align: center;
+        }
+
+        .btn:active { transform: scale(0.98); }
         
-        /* 按鈕 */
-        .btn { padding: 12px 24px; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; transition: 0.2s; width: 100%; }
-        .btn-primary { background: #4F46E5; color: white; }
-        .btn-primary:hover { background: #4338CA; }
-        .btn-secondary { background: #6b7280; color: white; margin-top: 10px; }
-        .btn-secondary:hover { background: #4b5563; }
+        .btn-primary { background-color: var(--primary); color: white; }
+        .btn-primary:hover { background-color: #2563eb; }
         
+        .btn-danger { background-color: var(--danger); color: white; }
+        .btn-danger:hover { background-color: #dc2626; }
+        
+        .btn-outline { background-color: transparent; border: 1px solid var(--border-color); color: var(--text-main); }
+        .btn-outline:hover { background-color: #f9fafb; }
+        
+        .btn-sm { padding: 6px 12px; font-size: 0.85rem; border-radius: 6px; }
+        .btn-block { width: 100%; }
+
         /* 列表樣式 */
-        .record-item {
-          display: flex; justify-content: space-between; align-items: center;
-          padding: 16px; border: 1px solid #f3f4f6; border-radius: 12px;
-          margin-bottom: 10px; transition: 0.2s; background: white;
+        .list-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-top: 32px;
+          margin-bottom: 16px;
+          border-bottom: 2px solid var(--border-color);
+          padding-bottom: 8px;
         }
-        .record-item:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); transform: translateY(-1px); border-color: #e5e7eb; }
-        .record-info { display: flex; flex-direction: column; }
-        .record-title { font-weight: 600; font-size: 16px; margin-bottom: 6px; color: #111827; }
-        .record-meta { font-size: 13px; color: #6b7280; }
-        .record-right { display: flex; align-items: center; gap: 20px; }
-        .record-amount { font-weight: bold; font-size: 18px; }
-        .text-income { color: #10B981; }
-        .text-expense { color: #EF4444; }
-        .action-btns button {
-          padding: 6px 12px; margin-left: 8px; border: none; border-radius: 6px;
-          cursor: pointer; font-size: 13px; font-weight: 500; transition: 0.2s;
+
+        .transaction-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          background: var(--card-bg);
+          padding: 16px;
+          border-radius: 12px;
+          margin-bottom: 12px;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+          transition: transform 0.2s;
         }
-        .btn-edit { background: #fef3c7; color: #d97706; }
-        .btn-edit:hover { background: #fde68a; }
-        .btn-delete { background: #fee2e2; color: #dc2626; }
-        .btn-delete:hover { background: #fecaca; }
+
+        .transaction-item:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+        }
+
+        .t-left { display: flex; flex-direction: column; gap: 4px; }
+        .t-date { font-size: 0.85rem; color: var(--text-muted); }
+        .t-cat { font-weight: 600; font-size: 1.1rem; }
+        .t-note { font-size: 0.9rem; color: var(--text-muted); }
         
-        .empty-state { text-align: center; padding: 40px; color: #6b7280; }
+        .t-right { display: flex; align-items: center; gap: 16px; }
+        .t-amount { font-size: 1.25rem; font-weight: 700; }
+        .t-actions { display: flex; gap: 8px; }
+
+        /* 訊息提示 */
+        .message-box {
+          padding: 12px;
+          border-radius: 8px;
+          margin-bottom: 16px;
+          font-size: 0.95rem;
+          font-weight: 500;
+          text-align: center;
+        }
+        .msg-error { background-color: #fef2f2; color: var(--danger); border: 1px solid #fecaca; }
+        .msg-success { background-color: #ecfdf5; color: var(--success); border: 1px solid #a7f3d0; }
+
+        @media (max-width: 600px) {
+          .transaction-item { flex-direction: column; align-items: flex-start; gap: 12px; }
+          .t-right { width: 100%; justify-content: space-between; }
+        }
       `}</style>
 
-      {/* 1. 載入中遮罩 (防未排版閃爍) */}
+      {/* 系統載入中遮罩 */}
       {isLoading && (
-        <div className="fullscreen-center overlay">
+        <div className="loading-mask">
           <div className="spinner"></div>
-          <h2 style={{ color: '#4b5563' }}>系統載入中...</h2>
+          <div style={{ color: 'var(--primary)', fontWeight: 'bold' }}>系統載入中...</div>
         </div>
       )}
 
-      {/* 2. 登入介面 (完全水平垂直置中) */}
-      {!isLoading && !isLoggedIn && (
-        <div className="fullscreen-center">
-          <div className="login-card">
-            <h2 style={{ marginBottom: '10px' }}>簡易記帳系統</h2>
-            <p style={{ color: '#6b7280', marginBottom: '30px', fontSize: '14px' }}>請輸入系統密碼以登入</p>
+      {/* 尚未登入：顯示登入畫面 */}
+      {!isAuthenticated && !isLoading && (
+        <div className="login-container">
+          <div className="card login-card">
+            <h2 style={{ marginBottom: '8px', color: 'var(--primary)' }}>簡易記帳系統</h2>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>請輸入管理員密碼以繼續 (預設: 1234)</p>
+            
+            {loginError && <div className="message-box msg-error">{loginError}</div>}
+            
             <form onSubmit={handleLogin}>
-              <div className="form-group">
+              <div className="form-group" style={{ marginBottom: '24px' }}>
                 <input
                   type="password"
                   className="form-control"
-                  placeholder="輸入密碼 (預設: 1234)"
-                  value={loginInput}
-                  onChange={(e) => setLoginInput(e.target.value)}
+                  placeholder="請輸入密碼"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
                   autoFocus
                 />
               </div>
-              <button type="submit" className="btn btn-primary" style={{ marginTop: '10px' }}>
+              <button type="submit" className="btn btn-primary btn-block">
                 登入系統
               </button>
             </form>
@@ -343,157 +516,209 @@ export default function App() {
         </div>
       )}
 
-      {/* 3. 主應用程式介面 */}
-      {!isLoading && isLoggedIn && (
+      {/* 已登入：顯示主系統介面 */}
+      {isAuthenticated && (
         <div className="app-container">
-          {/* Header 導覽列 */}
-          <div className="header">
-            <h2>個人記帳看板</h2>
-            <div>
+          {/* 導覽列 */}
+          <header className="header">
+            <h1 className="nav-brand">記帳系統</h1>
+            <div className="nav-menu">
               <button 
-                className={`nav-btn ${currentTab === 'dashboard' ? 'active' : ''}`}
-                onClick={() => setCurrentTab('dashboard')}
+                className={`btn btn-sm ${currentView === 'dashboard' ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setCurrentView('dashboard')}
               >
-                主控台
+                記帳看板
               </button>
               <button 
-                className={`nav-btn ${currentTab === 'settings' ? 'active' : ''}`}
-                onClick={() => setCurrentTab('settings')}
+                className={`btn btn-sm ${currentView === 'settings' ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setCurrentView('settings')}
               >
                 系統設定
               </button>
-              <button className="nav-btn logout" onClick={handleLogout}>
+              <button className="btn btn-sm btn-danger" onClick={handleLogout}>
                 登出
               </button>
             </div>
-          </div>
+          </header>
 
-          {/* 儀表板分頁 */}
-          {currentTab === 'dashboard' && (
+          {/* 視圖：記帳看板 */}
+          {currentView === 'dashboard' && (
             <>
               {/* 統計看板 */}
               <div className="stats-grid">
                 <div className="stat-card income">
-                  <h3>總收入</h3>
-                  <p>${totalIncome.toLocaleString()}</p>
+                  <div className="stat-title">總收入</div>
+                  <div className="stat-value text-success">${totalIncome.toLocaleString()}</div>
                 </div>
                 <div className="stat-card expense">
-                  <h3>總支出</h3>
-                  <p>${totalExpense.toLocaleString()}</p>
+                  <div className="stat-title">總支出</div>
+                  <div className="stat-value text-danger">${totalExpense.toLocaleString()}</div>
                 </div>
                 <div className="stat-card balance">
-                  <h3>目前結餘</h3>
-                  <p>${balance.toLocaleString()}</p>
+                  <div className="stat-title">目前結餘</div>
+                  <div className="stat-value text-primary">${balance.toLocaleString()}</div>
                 </div>
               </div>
 
               {/* 新增/編輯表單 */}
-              <div className="card">
+              <div className="card" style={{ marginBottom: '24px' }}>
                 <h3 style={{ marginTop: 0, marginBottom: '20px' }}>
-                  {editId ? '編輯記錄' : '新增記錄'}
+                  {editingId ? '編輯收支紀錄' : '新增收支紀錄'}
                 </h3>
-                <form onSubmit={handleSubmitRecord}>
+                
+                {formMessage.text && (
+                  <div className={`message-box msg-${formMessage.type}`}>
+                    {formMessage.text}
+                  </div>
+                )}
+
+                <form onSubmit={handleSubmitTransaction}>
                   <div className="form-grid">
                     <div className="form-group">
                       <label>日期</label>
                       <input 
-                        type="date" className="form-control" required
-                        value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})}
+                        type="date" className="form-control" name="date" 
+                        value={formData.date} onChange={handleInputChange} required 
                       />
                     </div>
                     <div className="form-group">
-                      <label>收支類型</label>
+                      <label>類型</label>
                       <select 
-                        className="form-control"
-                        value={formData.type} onChange={(e) => setFormData({...formData, type: e.target.value})}
+                        className="form-control" name="type" 
+                        value={formData.type} onChange={handleInputChange}
                       >
                         <option value="expense">支出</option>
                         <option value="income">收入</option>
                       </select>
                     </div>
                     <div className="form-group">
-                      <label>分類名稱</label>
+                      <label>分類 (如: 飲食, 薪水)</label>
                       <input 
-                        type="text" className="form-control" required placeholder="例：薪水、餐飲、交通"
-                        value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})}
+                        type="text" className="form-control" name="category" 
+                        value={formData.category} onChange={handleInputChange} 
+                        placeholder="請輸入分類" required 
                       />
                     </div>
                     <div className="form-group">
                       <label>金額</label>
                       <input 
-                        type="number" className="form-control" required min="0" placeholder="0"
-                        value={formData.amount} onChange={(e) => setFormData({...formData, amount: e.target.value})}
+                        type="number" className="form-control" name="amount" min="1"
+                        value={formData.amount} onChange={handleInputChange} 
+                        placeholder="0" required 
                       />
                     </div>
                   </div>
-                  <div className="form-group">
+                  <div className="form-group" style={{ marginBottom: '20px' }}>
                     <label>備註 (選填)</label>
                     <input 
-                      type="text" className="form-control" placeholder="記錄細節..."
-                      value={formData.note} onChange={(e) => setFormData({...formData, note: e.target.value})}
+                      type="text" className="form-control" name="note" 
+                      value={formData.note} onChange={handleInputChange} 
+                      placeholder="填寫備註細節..." 
                     />
                   </div>
-                  
-                  <button type="submit" className="btn btn-primary">
-                    {editId ? '儲存修改' : '新增記錄'}
-                  </button>
-                  {editId && (
-                    <button type="button" className="btn btn-secondary" onClick={() => { setEditId(null); setFormData(getInitialForm()); }}>
-                      取消編輯
+                  <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                    {editingId && (
+                      <button 
+                        type="button" 
+                        className="btn btn-outline" 
+                        onClick={() => {
+                          setEditingId(null);
+                          setFormData({ ...formData, category: '', amount: '', note: '' });
+                        }}
+                      >
+                        取消編輯
+                      </button>
+                    )}
+                    <button type="submit" className="btn btn-primary">
+                      {editingId ? '儲存變更' : '新增紀錄'}
                     </button>
-                  )}
+                  </div>
                 </form>
               </div>
 
-              {/* 記錄列表 */}
-              <div className="card" style={{ padding: '0', background: 'transparent', boxShadow: 'none' }}>
-                <h3 style={{ marginBottom: '15px' }}>明細列表 (日期降序)</h3>
-                
-                {records.length === 0 ? (
-                  <div className="card empty-state">目前尚無任何記帳記錄</div>
-                ) : (
-                  <div>
-                    {records.map(record => (
-                      <div className="record-item" key={record.id}>
-                        <div className="record-info">
-                          <span className="record-title">{record.category}</span>
-                          <span className="record-meta">
-                            {record.date} {record.note && ` • ${record.note}`}
-                          </span>
-                        </div>
-                        <div className="record-right">
-                          <span className={`record-amount ${record.type === 'income' ? 'text-income' : 'text-expense'}`}>
-                            {record.type === 'income' ? '+' : '-'}${Number(record.amount).toLocaleString()}
-                          </span>
-                          <div className="action-btns">
-                            <button className="btn-edit" onClick={() => handleEdit(record)}>編輯</button>
-                            <button className="btn-delete" onClick={() => handleDelete(record.id)}>刪除</button>
-                          </div>
+              {/* 收支明細列表 */}
+              <div className="list-header">
+                <h3 style={{ margin: 0 }}>收支明細</h3>
+                <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                  共 {transactions.length} 筆紀錄
+                </span>
+              </div>
+
+              {transactions.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                  目前尚無任何收支紀錄。
+                </div>
+              ) : (
+                <div className="transaction-list">
+                  {transactions.map(t => (
+                    <div className="transaction-item" key={t.id}>
+                      <div className="t-left">
+                        <span className="t-date">{t.date}</span>
+                        <span className="t-cat">{t.category}</span>
+                        {t.note && <span className="t-note">{t.note}</span>}
+                      </div>
+                      
+                      <div className="t-right">
+                        <span className={`t-amount ${t.type === 'income' ? 'text-success' : 'text-danger'}`}>
+                          {t.type === 'income' ? '+' : '-'}${Number(t.amount).toLocaleString()}
+                        </span>
+                        
+                        <div className="t-actions">
+                          {deleteConfirmId === t.id ? (
+                            <>
+                              <button className="btn btn-sm btn-danger" onClick={() => handleDelete(t.id)}>
+                                確認刪除
+                              </button>
+                              <button className="btn btn-sm btn-outline" onClick={() => setDeleteConfirmId(null)}>
+                                取消
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button className="btn btn-sm btn-outline" onClick={() => handleEdit(t)}>
+                                編輯
+                              </button>
+                              <button className="btn btn-sm btn-outline" style={{color: 'var(--danger)', borderColor: '#fca5a5'}} onClick={() => setDeleteConfirmId(t.id)}>
+                                刪除
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
 
-          {/* 系統設定分頁 */}
-          {currentTab === 'settings' && (
-            <div className="card">
-              <h3 style={{ marginTop: 0, marginBottom: '20px' }}>後台管理與設定</h3>
-              <form onSubmit={handleUpdatePassword}>
-                <div className="form-group" style={{ maxWidth: '400px' }}>
-                  <label>修改登入密碼</label>
-                  <input 
-                    type="password" className="form-control" required placeholder="輸入新密碼"
-                    value={newPasswordInput} onChange={(e) => setNewPasswordInput(e.target.value)}
-                  />
-                  <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>
-                    密碼將安全加密儲存於 Firestore 的 settings 集合中。
-                  </p>
+          {/* 視圖：系統設定 (修改密碼) */}
+          {currentView === 'settings' && (
+            <div className="card" style={{ maxWidth: '500px', margin: '0 auto' }}>
+              <h3 style={{ marginTop: 0, marginBottom: '20px' }}>系統安全設定</h3>
+              
+              {settingsMessage.text && (
+                <div className={`message-box msg-${settingsMessage.type}`}>
+                  {settingsMessage.text}
                 </div>
-                <button type="submit" className="btn btn-primary" style={{ maxWidth: '400px' }}>
+              )}
+
+              <form onSubmit={handleUpdatePassword}>
+                <div className="form-group" style={{ marginBottom: '24px' }}>
+                  <label>設定新密碼</label>
+                  <input
+                    type="password"
+                    className="form-control"
+                    placeholder="請輸入新密碼 (至少4碼)"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                  />
+                  <small style={{ color: 'var(--text-muted)', marginTop: '8px', display: 'block' }}>
+                    修改後將自動存入 Firestore 的 settings 集合中。
+                  </small>
+                </div>
+                <button type="submit" className="btn btn-primary btn-block">
                   更新密碼
                 </button>
               </form>
