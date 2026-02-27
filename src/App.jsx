@@ -1,11 +1,31 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, collection, addDoc, onSnapshot, query, orderBy, 
-  deleteDoc, doc, updateDoc, getDoc, setDoc 
+  getFirestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  onSnapshot 
 } from 'firebase/firestore';
+import { 
+  Wallet, 
+  TrendingUp, 
+  TrendingDown, 
+  Settings, 
+  LogOut, 
+  Edit2, 
+  Trash2, 
+  Plus,
+  Lock,
+  Loader2,
+  CheckCircle2
+} from 'lucide-react';
 
-// 初始化 Firebase
+// 1. Firebase 配置 (使用您提供的金鑰)
 const firebaseConfig = {
   apiKey: "AIzaSyCyiy4q9kzacnAaB-oURmXe00tRZ_ocf7M",
   authDomain: "test-ff8f4.firebaseapp.com",
@@ -19,151 +39,171 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+// 2. 內嵌樣式與動畫 (滿足樣式需求)
+const CustomStyles = () => (
+  <style>{`
+    .fade-in { animation: fadeIn 0.4s ease-out; }
+    .slide-up { animation: slideUp 0.4s ease-out forwards; }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    /* 隱藏數字輸入框的上下箭頭 */
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    
+    /* 自訂捲軸 */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  `}</style>
+);
+
 export default function App() {
+  // --- 狀態管理 ---
   const [isLoading, setIsLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard' or 'settings'
-  
-  // 資料狀態
-  const [transactions, setTransactions] = useState([]);
-  const [loginPassword, setLoginPassword] = useState('');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loginInput, setLoginInput] = useState('');
   const [loginError, setLoginError] = useState('');
   
+  const [systemPass, setSystemPass] = useState('1234');
+  const [transactions, setTransactions] = useState([]);
+  const [view, setView] = useState('dashboard'); // 'dashboard' | 'settings'
+  
   // 表單狀態
-  const [formData, setFormData] = useState({
-    date: new Date().toISOString().split('T')[0],
-    type: 'expense',
-    category: '',
-    amount: '',
-    note: ''
-  });
+  const getToday = () => new Date().toISOString().split('T')[0];
+  const initialForm = { date: getToday(), type: 'expense', category: '', amount: '', note: '' };
+  const [formData, setFormData] = useState(initialForm);
   const [editingId, setEditingId] = useState(null);
+  
+  // 刪除確認彈窗狀態
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
-  const [formMessage, setFormMessage] = useState({ text: '', type: '' });
-
+  
   // 設定頁面狀態
   const [newPassword, setNewPassword] = useState('');
-  const [settingsMessage, setSettingsMessage] = useState({ text: '', type: '' });
+  const [settingsMessage, setSettingsMessage] = useState('');
 
-  // 1. 初始化應用程式與檢查登入狀態
+  // --- 初始化與資料獲取 ---
   useEffect(() => {
-    const initApp = async () => {
+    // 檢查 localStorage 登入狀態
+    const checkAuth = localStorage.getItem('accounting_logged_in') === 'true';
+    if (checkAuth) setIsLoggedIn(true);
+
+    const initSystem = async () => {
       try {
-        // 確保設定檔中存在密碼，若無則預設為 1234
-        const authDocRef = doc(db, "settings", "auth");
-        const authDoc = await getDoc(authDocRef);
-        if (!authDoc.exists()) {
-          await setDoc(authDocRef, { password: "1234" });
+        // 獲取系統密碼設定
+        const settingsRef = doc(db, 'settings', 'config');
+        const settingsSnap = await getDoc(settingsRef);
+        
+        if (settingsSnap.exists()) {
+          setSystemPass(settingsSnap.data().password);
+        } else {
+          // 如果沒有設定檔，初始化預設密碼 '1234'
+          await setDoc(settingsRef, { password: '1234' });
         }
 
-        // 檢查 LocalStorage 登入狀態
-        const isAuth = localStorage.getItem('accounting_isAuth') === 'true';
-        setIsAuthenticated(isAuth);
-      } catch (error) {
-        console.error("初始化失敗:", error);
-      } finally {
-        // 只有未登入時才在此關閉 loading，登入的話由資料監聽器關閉
-        if (!(localStorage.getItem('accounting_isAuth') === 'true')) {
+        // 監聽記帳紀錄
+        const unsub = onSnapshot(collection(db, 'transactions'), (snapshot) => {
+          const data = [];
+          snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+          
+          // 在前端進行日期降序排列
+          data.sort((a, b) => new Date(b.date) - new Date(a.date));
+          setTransactions(data);
+          setIsLoading(false); // 資料載入完成，解除全螢幕遮罩
+        }, (error) => {
+          console.error("Firestore 同步錯誤:", error);
           setIsLoading(false);
-        }
+        });
+
+        return () => unsub();
+      } catch (error) {
+        console.error("系統初始化錯誤:", error);
+        setIsLoading(false);
       }
     };
-    initApp();
+
+    initSystem();
   }, []);
 
-  // 2. 登入後監聽資料庫變化
-  useEffect(() => {
-    let unsubscribe = () => {};
-    
-    if (isAuthenticated) {
-      setIsLoading(true);
-      const q = query(collection(db, "transactions"), orderBy("date", "desc"));
-      
-      unsubscribe = onSnapshot(q, (snapshot) => {
-        const data = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setTransactions(data);
-        setIsLoading(false);
-      }, (error) => {
-        console.error("讀取資料失敗:", error);
-        setIsLoading(false);
-      });
-    }
+  // --- 計算統計數據 ---
+  const stats = useMemo(() => {
+    let income = 0;
+    let expense = 0;
+    transactions.forEach(t => {
+      const amt = Number(t.amount);
+      if (t.type === 'income') income += amt;
+      else expense += amt;
+    });
+    return {
+      income,
+      expense,
+      balance: income - expense
+    };
+  }, [transactions]);
 
-    return () => unsubscribe();
-  }, [isAuthenticated]);
-
-  // 登入處理
-  const handleLogin = async (e) => {
+  // --- 事件處理 ---
+  const handleLogin = (e) => {
     e.preventDefault();
-    setIsLoading(true);
-    setLoginError('');
-    try {
-      const authDoc = await getDoc(doc(db, "settings", "auth"));
-      const currentPassword = authDoc.data().password;
-      
-      if (loginPassword === currentPassword) {
-        localStorage.setItem('accounting_isAuth', 'true');
-        setIsAuthenticated(true);
-      } else {
-        setLoginError('密碼錯誤，請重新輸入。');
-      }
-    } catch (error) {
-      setLoginError('系統發生錯誤，無法驗證密碼。');
+    if (loginInput === systemPass) {
+      localStorage.setItem('accounting_logged_in', 'true');
+      setIsLoggedIn(true);
+      setLoginError('');
+      setLoginInput('');
+    } else {
+      setLoginError('密碼錯誤，請重試');
     }
-    setIsLoading(false);
   };
 
-  // 登出處理
   const handleLogout = () => {
-    localStorage.removeItem('accounting_isAuth');
-    setIsAuthenticated(false);
-    setCurrentView('dashboard');
+    localStorage.removeItem('accounting_logged_in');
+    setIsLoggedIn(false);
+    setView('dashboard');
   };
 
-  // 表單輸入處理
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  // 提交記帳表單
-  const handleSubmitTransaction = async (e) => {
+  const handleFormSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.category || !formData.amount) {
-      showMessage(setFormMessage, '分類與金額為必填欄位', 'error');
-      return;
-    }
+    if (!formData.date || !formData.category || !formData.amount) return;
 
-    setIsLoading(true);
+    const dataToSave = {
+      ...formData,
+      amount: Number(formData.amount)
+    };
+
     try {
-      const payload = {
-        ...formData,
-        amount: Number(formData.amount),
-        timestamp: new Date().getTime()
-      };
-
       if (editingId) {
-        await updateDoc(doc(db, "transactions", editingId), payload);
-        showMessage(setFormMessage, '更新成功', 'success');
-        setEditingId(null);
+        await updateDoc(doc(db, 'transactions', editingId), dataToSave);
       } else {
-        await addDoc(collection(db, "transactions"), payload);
-        showMessage(setFormMessage, '新增成功', 'success');
+        await addDoc(collection(db, 'transactions'), dataToSave);
       }
-      
-      // 重置部分表單
-      setFormData(prev => ({ ...prev, category: '', amount: '', note: '' }));
+      // 重置表單
+      setFormData(initialForm);
+      setEditingId(null);
     } catch (error) {
-      console.error(error);
-      showMessage(setFormMessage, '儲存失敗，請重試', 'error');
+      console.error("儲存失敗:", error);
     }
-    setIsLoading(false);
   };
 
-  // 編輯記錄
   const handleEdit = (transaction) => {
     setFormData({
       date: transaction.date,
@@ -176,556 +216,397 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // 刪除記錄
-  const handleDelete = async (id) => {
-    setIsLoading(true);
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return;
     try {
-      await deleteDoc(doc(db, "transactions", id));
+      await deleteDoc(doc(db, 'transactions', deleteConfirmId));
       setDeleteConfirmId(null);
     } catch (error) {
-      console.error(error);
-      showMessage(setFormMessage, '刪除失敗', 'error');
+      console.error("刪除失敗:", error);
     }
-    setIsLoading(false);
   };
 
-  // 更新密碼
-  const handleUpdatePassword = async (e) => {
+  const handleChangePassword = async (e) => {
     e.preventDefault();
     if (!newPassword || newPassword.length < 4) {
-      showMessage(setSettingsMessage, '新密碼至少需 4 個字元', 'error');
+      setSettingsMessage('密碼長度至少需 4 個字元');
       return;
     }
-
-    setIsLoading(true);
     try {
-      await updateDoc(doc(db, "settings", "auth"), { password: newPassword });
-      showMessage(setSettingsMessage, '密碼更新成功！', 'success');
+      await setDoc(doc(db, 'settings', 'config'), { password: newPassword });
+      setSystemPass(newPassword);
       setNewPassword('');
+      setSettingsMessage('密碼修改成功！');
+      setTimeout(() => setSettingsMessage(''), 3000);
     } catch (error) {
-      showMessage(setSettingsMessage, '密碼更新失敗', 'error');
+      console.error("密碼修改失敗:", error);
+      setSettingsMessage('修改失敗，請稍後再試');
     }
-    setIsLoading(false);
   };
 
-  // 共用顯示訊息工具
-  const showMessage = (setter, text, type) => {
-    setter({ text, type });
-    setTimeout(() => setter({ text: '', type: '' }), 3000);
-  };
+  // --- 畫面渲染 ---
 
-  // 統計計算
-  const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
-  const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
-  const balance = totalIncome - totalExpense;
+  // 1. 全螢幕載入遮罩
+  if (isLoading) {
+    return (
+      <div className="fixed inset-0 bg-slate-50 z-50 flex flex-col items-center justify-center">
+        <CustomStyles />
+        <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+        <h2 className="text-xl font-medium text-slate-700 fade-in">系統載入中...</h2>
+        <p className="text-slate-500 text-sm mt-2 fade-in">正在連線至安全資料庫</p>
+      </div>
+    );
+  }
 
-  return (
-    <>
-      {/* 內嵌樣式定義區 */}
-      <style>{`
-        :root {
-          --primary: #3b82f6;     /* 藍色 */
-          --success: #10b981;     /* 綠色 */
-          --danger: #ef4444;      /* 紅色 */
-          --bg-color: #f3f4f6;
-          --card-bg: #ffffff;
-          --text-main: #1f2937;
-          --text-muted: #6b7280;
-          --border-color: #e5e7eb;
-        }
-
-        body {
-          margin: 0;
-          padding: 0;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-          background-color: var(--bg-color);
-          color: var(--text-main);
-          box-sizing: border-box;
-        }
-        
-        * {
-          box-sizing: inherit;
-        }
-
-        /* 全螢幕載入遮罩 */
-        .loading-mask {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100vw;
-          height: 100vh;
-          background-color: rgba(255, 255, 255, 0.9);
-          backdrop-filter: blur(4px);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          z-index: 9999;
-        }
-
-        .spinner {
-          width: 50px;
-          height: 50px;
-          border: 5px solid var(--border-color);
-          border-top-color: var(--primary);
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin-bottom: 16px;
-        }
-
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-
-        /* 登入畫面 - 絕對置中 */
-        .login-container {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 100vh;
-          padding: 20px;
-        }
-
-        .card {
-          background-color: var(--card-bg);
-          border-radius: 16px;
-          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-          padding: 32px;
-          width: 100%;
-        }
-
-        .login-card {
-          max-width: 400px;
-          text-align: center;
-        }
-
-        /* 系統主要容器 */
-        .app-container {
-          max-width: 900px;
-          margin: 0 auto;
-          padding: 24px 16px;
-        }
-
-        /* 導覽列 */
-        .header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 24px;
-        }
-
-        .nav-brand {
-          font-size: 1.5rem;
-          font-weight: bold;
-          color: var(--primary);
-          margin: 0;
-        }
-
-        .nav-menu {
-          display: flex;
-          gap: 16px;
-          align-items: center;
-        }
-
-        /* 統計看板 */
-        .stats-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-          gap: 16px;
-          margin-bottom: 32px;
-        }
-
-        .stat-card {
-          padding: 24px;
-          border-radius: 16px;
-          background: var(--card-bg);
-          box-shadow: 0 4px 6px rgba(0,0,0,0.03);
-          text-align: center;
-          border-top: 4px solid transparent;
-        }
-
-        .stat-card.income { border-top-color: var(--success); }
-        .stat-card.expense { border-top-color: var(--danger); }
-        .stat-card.balance { border-top-color: var(--primary); }
-
-        .stat-title {
-          font-size: 0.95rem;
-          color: var(--text-muted);
-          margin-bottom: 8px;
-          font-weight: 500;
-        }
-
-        .stat-value {
-          font-size: 2rem;
-          font-weight: 700;
-        }
-        
-        .text-success { color: var(--success); }
-        .text-danger { color: var(--danger); }
-        .text-primary { color: var(--primary); }
-
-        /* 表單與列表 */
-        .form-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-          gap: 16px;
-          margin-bottom: 16px;
-        }
-
-        .form-group {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          text-align: left;
-        }
-
-        .form-group label {
-          font-size: 0.9rem;
-          font-weight: 600;
-          color: var(--text-main);
-        }
-
-        .form-control {
-          padding: 10px 14px;
-          border: 1px solid var(--border-color);
-          border-radius: 8px;
-          font-size: 1rem;
-          transition: border-color 0.2s, box-shadow 0.2s;
-          background: #fafafa;
-        }
-
-        .form-control:focus {
-          outline: none;
-          border-color: var(--primary);
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-          background: #fff;
-        }
-
-        /* 按鈕樣式 */
-        .btn {
-          padding: 10px 20px;
-          border: none;
-          border-radius: 8px;
-          font-size: 1rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: background-color 0.2s, transform 0.1s;
-          text-align: center;
-        }
-
-        .btn:active { transform: scale(0.98); }
-        
-        .btn-primary { background-color: var(--primary); color: white; }
-        .btn-primary:hover { background-color: #2563eb; }
-        
-        .btn-danger { background-color: var(--danger); color: white; }
-        .btn-danger:hover { background-color: #dc2626; }
-        
-        .btn-outline { background-color: transparent; border: 1px solid var(--border-color); color: var(--text-main); }
-        .btn-outline:hover { background-color: #f9fafb; }
-        
-        .btn-sm { padding: 6px 12px; font-size: 0.85rem; border-radius: 6px; }
-        .btn-block { width: 100%; }
-
-        /* 列表樣式 */
-        .list-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-top: 32px;
-          margin-bottom: 16px;
-          border-bottom: 2px solid var(--border-color);
-          padding-bottom: 8px;
-        }
-
-        .transaction-item {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          background: var(--card-bg);
-          padding: 16px;
-          border-radius: 12px;
-          margin-bottom: 12px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-          transition: transform 0.2s;
-        }
-
-        .transaction-item:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 8px rgba(0,0,0,0.05);
-        }
-
-        .t-left { display: flex; flex-direction: column; gap: 4px; }
-        .t-date { font-size: 0.85rem; color: var(--text-muted); }
-        .t-cat { font-weight: 600; font-size: 1.1rem; }
-        .t-note { font-size: 0.9rem; color: var(--text-muted); }
-        
-        .t-right { display: flex; align-items: center; gap: 16px; }
-        .t-amount { font-size: 1.25rem; font-weight: 700; }
-        .t-actions { display: flex; gap: 8px; }
-
-        /* 訊息提示 */
-        .message-box {
-          padding: 12px;
-          border-radius: 8px;
-          margin-bottom: 16px;
-          font-size: 0.95rem;
-          font-weight: 500;
-          text-align: center;
-        }
-        .msg-error { background-color: #fef2f2; color: var(--danger); border: 1px solid #fecaca; }
-        .msg-success { background-color: #ecfdf5; color: var(--success); border: 1px solid #a7f3d0; }
-
-        @media (max-width: 600px) {
-          .transaction-item { flex-direction: column; align-items: flex-start; gap: 12px; }
-          .t-right { width: 100%; justify-content: space-between; }
-        }
-      `}</style>
-
-      {/* 系統載入中遮罩 */}
-      {isLoading && (
-        <div className="loading-mask">
-          <div className="spinner"></div>
-          <div style={{ color: 'var(--primary)', fontWeight: 'bold' }}>系統載入中...</div>
+  // 2. 登入畫面 (確保完全水平垂直置中)
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 to-blue-50 flex items-center justify-center p-4">
+        <CustomStyles />
+        <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm slide-up border border-slate-100">
+          <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <Lock className="w-8 h-8 text-blue-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-center mb-2 text-slate-800">歡迎回來</h2>
+          <p className="text-center text-slate-500 mb-8 text-sm">請輸入安全密碼以存取您的記帳資料</p>
+          
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div>
+              <input
+                type="password"
+                placeholder="請輸入密碼"
+                value={loginInput}
+                onChange={(e) => setLoginInput(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-center tracking-widest text-lg"
+                autoFocus
+              />
+              {loginError && <p className="text-red-500 text-sm mt-2 text-center">{loginError}</p>}
+            </div>
+            <button
+              type="submit"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-xl transition-all active:scale-[0.98] shadow-md hover:shadow-lg flex justify-center items-center gap-2"
+            >
+              進入系統
+            </button>
+          </form>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      {/* 尚未登入：顯示登入畫面 */}
-      {!isAuthenticated && !isLoading && (
-        <div className="login-container">
-          <div className="card login-card">
-            <h2 style={{ marginBottom: '8px', color: 'var(--primary)' }}>簡易記帳系統</h2>
-            <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>請輸入管理員密碼以繼續 (預設: 1234)</p>
-            
-            {loginError && <div className="message-box msg-error">{loginError}</div>}
-            
-            <form onSubmit={handleLogin}>
-              <div className="form-group" style={{ marginBottom: '24px' }}>
-                <input
-                  type="password"
-                  className="form-control"
-                  placeholder="請輸入密碼"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  autoFocus
-                />
+  // 3. 主應用程式畫面
+  return (
+    <div className="min-h-screen bg-slate-50 pb-20">
+      <CustomStyles />
+      
+      {/* 頂部導航列 */}
+      <nav className="bg-white shadow-sm sticky top-0 z-30">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16 items-center">
+            <div className="flex items-center gap-2">
+              <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-sm">
+                <Wallet className="w-5 h-5 text-white" />
               </div>
-              <button type="submit" className="btn btn-primary btn-block">
-                登入系統
+              <span className="text-xl font-bold text-slate-800 tracking-wide">簡易記帳</span>
+            </div>
+            <div className="flex items-center gap-2 sm:gap-4">
+              <button 
+                onClick={() => setView('dashboard')}
+                className={`p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors ${view === 'dashboard' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                <span className="hidden sm:inline">儀表板</span>
+                <Wallet className="w-5 h-5 sm:hidden" />
               </button>
-            </form>
+              <button 
+                onClick={() => setView('settings')}
+                className={`p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors ${view === 'settings' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                <span className="hidden sm:inline">設定</span>
+                <Settings className="w-5 h-5 sm:hidden" />
+              </button>
+              <div className="h-6 w-px bg-slate-200 mx-1"></div>
+              <button 
+                onClick={handleLogout}
+                className="p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors flex items-center gap-1"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="hidden sm:inline">登出</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      {/* 內容區域 */}
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 fade-in">
+        
+        {view === 'dashboard' ? (
+          <>
+            {/* 統計看板 (不同顏色區分) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 relative overflow-hidden group">
+                <div className="absolute -right-4 -top-4 w-24 h-24 bg-green-50 rounded-full group-hover:scale-110 transition-transform"></div>
+                <div className="relative">
+                  <div className="flex items-center gap-2 text-green-600 mb-2">
+                    <TrendingUp className="w-5 h-5" />
+                    <span className="font-medium">總收入</span>
+                  </div>
+                  <div className="text-3xl font-bold text-slate-800">
+                    $ {stats.income.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 relative overflow-hidden group">
+                <div className="absolute -right-4 -top-4 w-24 h-24 bg-red-50 rounded-full group-hover:scale-110 transition-transform"></div>
+                <div className="relative">
+                  <div className="flex items-center gap-2 text-red-600 mb-2">
+                    <TrendingDown className="w-5 h-5" />
+                    <span className="font-medium">總支出</span>
+                  </div>
+                  <div className="text-3xl font-bold text-slate-800">
+                    $ {stats.expense.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 relative overflow-hidden group">
+                <div className="absolute -right-4 -top-4 w-24 h-24 bg-blue-50 rounded-full group-hover:scale-110 transition-transform"></div>
+                <div className="relative">
+                  <div className="flex items-center gap-2 text-blue-600 mb-2">
+                    <Wallet className="w-5 h-5" />
+                    <span className="font-medium">結餘</span>
+                  </div>
+                  <div className="text-3xl font-bold text-slate-800">
+                    $ {stats.balance.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* 新增/編輯表單 */}
+              <div className="lg:col-span-1">
+                <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 sticky top-24">
+                  <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
+                    {editingId ? <Edit2 className="w-5 h-5 text-blue-600" /> : <Plus className="w-5 h-5 text-blue-600" />}
+                    {editingId ? '編輯紀錄' : '新增紀錄'}
+                  </h3>
+                  
+                  <form onSubmit={handleFormSubmit} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">日期</label>
+                      <input 
+                        type="date" 
+                        required
+                        value={formData.date}
+                        onChange={e => setFormData({...formData, date: e.target.value})}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">類型</label>
+                      <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => setFormData({...formData, type: 'expense'})}
+                          className={`py-2 rounded-lg text-sm font-medium transition-all ${formData.type === 'expense' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                          支出
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormData({...formData, type: 'income'})}
+                          className={`py-2 rounded-lg text-sm font-medium transition-all ${formData.type === 'income' ? 'bg-white text-green-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                          收入
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">分類</label>
+                      <input 
+                        type="text" 
+                        required
+                        placeholder="例如：餐飲、交通、薪水..."
+                        value={formData.category}
+                        onChange={e => setFormData({...formData, category: e.target.value})}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">金額</label>
+                      <input 
+                        type="number" 
+                        required
+                        min="0"
+                        placeholder="0"
+                        value={formData.amount}
+                        onChange={e => setFormData({...formData, amount: e.target.value})}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-lg font-medium"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">備註 (選填)</label>
+                      <input 
+                        type="text" 
+                        placeholder="寫點什麼..."
+                        value={formData.note}
+                        onChange={e => setFormData({...formData, note: e.target.value})}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                      />
+                    </div>
+
+                    <div className="pt-2 flex gap-2">
+                      <button 
+                        type="submit"
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-xl transition-all active:scale-[0.98] shadow-sm flex justify-center items-center gap-2"
+                      >
+                        {editingId ? '儲存修改' : '新增紀錄'}
+                      </button>
+                      {editingId && (
+                        <button 
+                          type="button"
+                          onClick={() => { setEditingId(null); setFormData(initialForm); }}
+                          className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-all active:scale-[0.98]"
+                        >
+                          取消
+                        </button>
+                      )}
+                    </div>
+                  </form>
+                </div>
+              </div>
+
+              {/* 交易列表 */}
+              <div className="lg:col-span-2">
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                  <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+                    <h3 className="text-lg font-bold text-slate-800">近期紀錄</h3>
+                    <span className="text-sm text-slate-500 bg-slate-100 px-3 py-1 rounded-full">共 {transactions.length} 筆</span>
+                  </div>
+                  
+                  {transactions.length === 0 ? (
+                    <div className="p-12 text-center text-slate-400">
+                      <Wallet className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                      <p>尚無任何記帳紀錄，趕快來新增一筆吧！</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-50">
+                      {transactions.map((t) => (
+                        <div key={t.id} className="p-4 sm:p-6 hover:bg-slate-50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4 group">
+                          <div className="flex items-center gap-4">
+                            <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${t.type === 'income' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                              {t.type === 'income' ? <TrendingUp className="w-6 h-6" /> : <TrendingDown className="w-6 h-6" />}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="font-bold text-slate-800 text-lg">{t.category}</span>
+                                <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">{t.date}</span>
+                              </div>
+                              {t.note && <p className="text-sm text-slate-500">{t.note}</p>}
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center justify-between sm:justify-end gap-6 sm:w-auto w-full pl-16 sm:pl-0">
+                            <span className={`text-xl font-bold ${t.type === 'income' ? 'text-green-600' : 'text-slate-800'}`}>
+                              {t.type === 'income' ? '+' : '-'} ${Number(t.amount).toLocaleString()}
+                            </span>
+                            <div className="flex gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={() => handleEdit(t)}
+                                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                title="編輯"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={() => setDeleteConfirmId(t.id)}
+                                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                title="刪除"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          /* 設定頁面 */
+          <div className="max-w-md mx-auto slide-up">
+            <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-slate-100">
+              <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mb-6">
+                <Settings className="w-6 h-6 text-slate-700" />
+              </div>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">系統設定</h2>
+              <p className="text-slate-500 mb-8 text-sm">修改您的登入密碼以確保資料安全。</p>
+              
+              <form onSubmit={handleChangePassword} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">新密碼</label>
+                  <input
+                    type="text"
+                    placeholder="請輸入新密碼 (至少 4 碼)"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-xl transition-all active:scale-[0.98] shadow-md"
+                >
+                  儲存新密碼
+                </button>
+
+                {settingsMessage && (
+                  <div className={`p-4 rounded-xl flex items-center gap-2 text-sm ${settingsMessage.includes('成功') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                    {settingsMessage.includes('成功') ? <CheckCircle2 className="w-5 h-5" /> : null}
+                    {settingsMessage}
+                  </div>
+                )}
+              </form>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* 自訂刪除確認彈窗 (取代原生的 confirm) */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in">
+          <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full slide-up">
+            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4 mx-auto">
+              <Trash2 className="w-6 h-6 text-red-600" />
+            </div>
+            <h3 className="text-xl font-bold mb-2 text-center text-slate-800">確認刪除</h3>
+            <p className="text-slate-500 mb-6 text-center">確定要刪除這筆記帳紀錄嗎？<br/>此動作無法復原。</p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setDeleteConfirmId(null)} 
+                className="flex-1 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors"
+              >
+                取消
+              </button>
+              <button 
+                onClick={confirmDelete} 
+                className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white font-medium rounded-xl transition-colors shadow-sm"
+              >
+                確定刪除
+              </button>
+            </div>
           </div>
         </div>
       )}
-
-      {/* 已登入：顯示主系統介面 */}
-      {isAuthenticated && (
-        <div className="app-container">
-          {/* 導覽列 */}
-          <header className="header">
-            <h1 className="nav-brand">記帳系統</h1>
-            <div className="nav-menu">
-              <button 
-                className={`btn btn-sm ${currentView === 'dashboard' ? 'btn-primary' : 'btn-outline'}`}
-                onClick={() => setCurrentView('dashboard')}
-              >
-                記帳看板
-              </button>
-              <button 
-                className={`btn btn-sm ${currentView === 'settings' ? 'btn-primary' : 'btn-outline'}`}
-                onClick={() => setCurrentView('settings')}
-              >
-                系統設定
-              </button>
-              <button className="btn btn-sm btn-danger" onClick={handleLogout}>
-                登出
-              </button>
-            </div>
-          </header>
-
-          {/* 視圖：記帳看板 */}
-          {currentView === 'dashboard' && (
-            <>
-              {/* 統計看板 */}
-              <div className="stats-grid">
-                <div className="stat-card income">
-                  <div className="stat-title">總收入</div>
-                  <div className="stat-value text-success">${totalIncome.toLocaleString()}</div>
-                </div>
-                <div className="stat-card expense">
-                  <div className="stat-title">總支出</div>
-                  <div className="stat-value text-danger">${totalExpense.toLocaleString()}</div>
-                </div>
-                <div className="stat-card balance">
-                  <div className="stat-title">目前結餘</div>
-                  <div className="stat-value text-primary">${balance.toLocaleString()}</div>
-                </div>
-              </div>
-
-              {/* 新增/編輯表單 */}
-              <div className="card" style={{ marginBottom: '24px' }}>
-                <h3 style={{ marginTop: 0, marginBottom: '20px' }}>
-                  {editingId ? '編輯收支紀錄' : '新增收支紀錄'}
-                </h3>
-                
-                {formMessage.text && (
-                  <div className={`message-box msg-${formMessage.type}`}>
-                    {formMessage.text}
-                  </div>
-                )}
-
-                <form onSubmit={handleSubmitTransaction}>
-                  <div className="form-grid">
-                    <div className="form-group">
-                      <label>日期</label>
-                      <input 
-                        type="date" className="form-control" name="date" 
-                        value={formData.date} onChange={handleInputChange} required 
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>類型</label>
-                      <select 
-                        className="form-control" name="type" 
-                        value={formData.type} onChange={handleInputChange}
-                      >
-                        <option value="expense">支出</option>
-                        <option value="income">收入</option>
-                      </select>
-                    </div>
-                    <div className="form-group">
-                      <label>分類 (如: 飲食, 薪水)</label>
-                      <input 
-                        type="text" className="form-control" name="category" 
-                        value={formData.category} onChange={handleInputChange} 
-                        placeholder="請輸入分類" required 
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>金額</label>
-                      <input 
-                        type="number" className="form-control" name="amount" min="1"
-                        value={formData.amount} onChange={handleInputChange} 
-                        placeholder="0" required 
-                      />
-                    </div>
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '20px' }}>
-                    <label>備註 (選填)</label>
-                    <input 
-                      type="text" className="form-control" name="note" 
-                      value={formData.note} onChange={handleInputChange} 
-                      placeholder="填寫備註細節..." 
-                    />
-                  </div>
-                  <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                    {editingId && (
-                      <button 
-                        type="button" 
-                        className="btn btn-outline" 
-                        onClick={() => {
-                          setEditingId(null);
-                          setFormData({ ...formData, category: '', amount: '', note: '' });
-                        }}
-                      >
-                        取消編輯
-                      </button>
-                    )}
-                    <button type="submit" className="btn btn-primary">
-                      {editingId ? '儲存變更' : '新增紀錄'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-
-              {/* 收支明細列表 */}
-              <div className="list-header">
-                <h3 style={{ margin: 0 }}>收支明細</h3>
-                <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                  共 {transactions.length} 筆紀錄
-                </span>
-              </div>
-
-              {transactions.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                  目前尚無任何收支紀錄。
-                </div>
-              ) : (
-                <div className="transaction-list">
-                  {transactions.map(t => (
-                    <div className="transaction-item" key={t.id}>
-                      <div className="t-left">
-                        <span className="t-date">{t.date}</span>
-                        <span className="t-cat">{t.category}</span>
-                        {t.note && <span className="t-note">{t.note}</span>}
-                      </div>
-                      
-                      <div className="t-right">
-                        <span className={`t-amount ${t.type === 'income' ? 'text-success' : 'text-danger'}`}>
-                          {t.type === 'income' ? '+' : '-'}${Number(t.amount).toLocaleString()}
-                        </span>
-                        
-                        <div className="t-actions">
-                          {deleteConfirmId === t.id ? (
-                            <>
-                              <button className="btn btn-sm btn-danger" onClick={() => handleDelete(t.id)}>
-                                確認刪除
-                              </button>
-                              <button className="btn btn-sm btn-outline" onClick={() => setDeleteConfirmId(null)}>
-                                取消
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button className="btn btn-sm btn-outline" onClick={() => handleEdit(t)}>
-                                編輯
-                              </button>
-                              <button className="btn btn-sm btn-outline" style={{color: 'var(--danger)', borderColor: '#fca5a5'}} onClick={() => setDeleteConfirmId(t.id)}>
-                                刪除
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          {/* 視圖：系統設定 (修改密碼) */}
-          {currentView === 'settings' && (
-            <div className="card" style={{ maxWidth: '500px', margin: '0 auto' }}>
-              <h3 style={{ marginTop: 0, marginBottom: '20px' }}>系統安全設定</h3>
-              
-              {settingsMessage.text && (
-                <div className={`message-box msg-${settingsMessage.type}`}>
-                  {settingsMessage.text}
-                </div>
-              )}
-
-              <form onSubmit={handleUpdatePassword}>
-                <div className="form-group" style={{ marginBottom: '24px' }}>
-                  <label>設定新密碼</label>
-                  <input
-                    type="password"
-                    className="form-control"
-                    placeholder="請輸入新密碼 (至少4碼)"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    required
-                  />
-                  <small style={{ color: 'var(--text-muted)', marginTop: '8px', display: 'block' }}>
-                    修改後將自動存入 Firestore 的 settings 集合中。
-                  </small>
-                </div>
-                <button type="submit" className="btn btn-primary btn-block">
-                  更新密碼
-                </button>
-              </form>
-            </div>
-          )}
-        </div>
-      )}
-    </>
+    </div>
   );
 }
